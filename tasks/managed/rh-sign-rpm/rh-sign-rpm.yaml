@@ -64,7 +64,7 @@ spec:
     - name: signedRpmsDomain
       type: string
       description: The domain to use for pushing signed RPMs
-      default: rok-storage
+      default: konflux-direct-signing-test
     - name: pipelineImage
       type: string
       description: Container image to use for the signing pipeline
