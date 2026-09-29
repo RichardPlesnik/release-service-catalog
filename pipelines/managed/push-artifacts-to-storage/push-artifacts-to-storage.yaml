@@ -29,10 +29,11 @@ spec:
     - name: taskGitUrl
       type: string
       description: The url to the git repo where the release-service-catalog tasks to be used are stored
-      default: https://github.com/konflux-ci/release-service-catalog.git
+      default: https://github.com/RichardPlesnik/release-service-catalog.git
     - name: taskGitRevision
       type: string
       description: The revision in the taskGitUrl repo to be used
+      default: ISV-7118-3
     - name: enterpriseContractPolicy
       type: string
       description: JSON representation of the EnterpriseContractPolicy
@@ -180,7 +181,8 @@ spec:
               {"resultIndex": 0, "key": ".conforma.workerCount", "default": "4"},
               {"resultIndex": 1, "key": ".pushOptions.pushKeytab.secret"},
               {"resultIndex": 2, "key": ".pushOptions.pushPipelineImage"},
-              {"resultIndex": 3, "key": ".pushOptions.pushType", "default": "import"}
+              {"resultIndex": 3, "key": ".pushOptions.pushType", "default": "import"},
+              {"resultIndex": 4, "key": ".pulp.domain"}
             ]
         - name: taskGitUrl
           value: "$(params.taskGitUrl)"
@@ -330,6 +332,8 @@ spec:
           value: "$(tasks.collect-data.results.snapshotBuildId)"
         - name: pipelineImage
           value: $(tasks.collect-task-params.results.extractedValues[2])
+        - name: pulpDomain
+          value: $(tasks.collect-task-params.results.extractedValues[4])
         - name: ociStorage
           value: $(params.ociStorage)
         - name: sourceDataArtifact
@@ -376,7 +380,7 @@ spec:
         - name: trustedArtifactsDebug
           value: "$(params.trustedArtifactsDebug)"
         - name: destinationArtifactStorageDomain
-          value: "rok-storage"
+          value: "$(tasks.collect-task-params.results.extractedValues[4])"
         - name: createOciArtifact
           value: "true"
         - name: taskGitUrl
@@ -385,43 +389,6 @@ spec:
           value: "$(params.taskGitRevision)"
       runAfter:
         - push-artifacts-to-storage
-      when:
-        - input: $(tasks.collect-task-params.results.extractedValues[3])
-          operator: in
-          values: ["promote"]
-    - name: promote-koji-draft-build
-      taskRef:
-        resolver: "git"
-        params:
-          - name: url
-            value: $(params.taskGitUrl)
-          - name: revision
-            value: $(params.taskGitRevision)
-          - name: pathInRepo
-            value: tasks/managed/promote-koji-draft-build/promote-koji-draft-build.yaml
-      params:
-        - name: dataPath
-          value: "$(tasks.collect-data.results.data)"
-        - name: snapshotPath
-          value: "$(tasks.collect-data.results.snapshotSpec)"
-        - name: pushSecret
-          value: $(tasks.collect-task-params.results.extractedValues[1])
-        - name: pipelineImage
-          value: $(tasks.collect-task-params.results.extractedValues[2])
-        - name: ociStorage
-          value: $(params.ociStorage)
-        - name: sourceDataArtifact
-          value: "$(tasks.rh-sign-rpm.results.sourceDataArtifact)"
-        - name: dataDir
-          value: $(params.dataDir)
-        - name: trustedArtifactsDebug
-          value: "$(params.trustedArtifactsDebug)"
-        - name: taskGitUrl
-          value: "$(params.taskGitUrl)"
-        - name: taskGitRevision
-          value: "$(params.taskGitRevision)"
-      runAfter:
-        - rh-sign-rpm
       when:
         - input: $(tasks.collect-task-params.results.extractedValues[3])
           operator: in
