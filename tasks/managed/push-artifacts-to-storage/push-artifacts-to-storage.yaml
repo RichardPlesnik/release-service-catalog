@@ -8,7 +8,7 @@ metadata:
     tekton.dev/tags: push-rok-storage
 spec:
   description: |-
-    Tekton task to push konflux builds to artifact storage.
+    Tekton task to upload an RPM fixture to the test artifact storage domain.
   params:
     - name: snapshotPath
       type: string
@@ -58,6 +58,10 @@ spec:
       type: string
       description: |
         Path to the JSON file of the merged data to use in the data workspace
+    - name: pulpDomain
+      type: string
+      description: Pulp domain for uploading the test RPM fixture
+      default: konflux-direct-signing-test
     - name: dataDir
       description: The location where data will be stored
       type: string
@@ -125,30 +129,68 @@ spec:
           value: $(params.dataDir)
         - name: sourceDataArtifact
           value: $(params.sourceDataArtifact)
-    - name: push-artifacts-to-storage
-      image: quay.io/konflux-ci/release-service-utils@sha256:e4b9c669bd86e7bbb7cce855f5c8deecb472ca93f5da371b18f208aa9841993b
+    - name: download-test-rpm
+      image: quay.io/konflux-ci/release-service-utils@sha256:5546fa78d3c88d7b6a2e8cff8902f7757f00541d0bbaf113b9f293133894afa3
       computeResources:
         limits:
-          memory: 512Mi
+          memory: 128Mi
+          cpu: 100m
         requests:
-          memory: 512Mi
+          memory: 128Mi
+          cpu: 50m
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        rpm_dir="/var/workdir/fixture-rpms"
+        mkdir -p "${rpm_dir}"
+        rpm_url="https://download-01.beak-001.prod.iad2.dc.redhat.com/brewroot/vol/rhel-9/"
+        rpm_url+="packages/alsa-lib/1.2.3.2/5.el9/x86_64/alsa-lib-1.2.3.2-5.el9.x86_64.rpm"
+        curl --retry 3 -sS --fail-with-body --location \
+          --output "${rpm_dir}/alsa-lib-1.2.3.2-5.el9.x86_64.rpm" \
+          "${rpm_url}"
+    - name: push-artifacts-to-storage
+      image: quay.io/redhat-user-workloads/artifact-storage-tenant/tooling/pulp-tool-container:latest
+      computeResources:
+        limits:
+          memory: 256Mi
           cpu: 250m
-      env:
-        - name: PARAM_SNAPSHOT_PATH
-          value: $(params.snapshotPath)
-        - name: PARAM_DATA_DIR
-          value: $(params.dataDir)
-        - name: PARAM_DATA_PATH
-          value: $(params.dataPath)
-        - name: PARAM_SNAPSHOT_BUILD_ID
-          value: $(params.snapshotBuildId)
-        - name: PARAM_SNAPSHOT_NAMESPACE
-          value: $(params.snapshotNamespace)
-      command: ["python3", "-m", "push_artifacts_to_storage"]
+        requests:
+          memory: 256Mi
+          cpu: 100m
       volumeMounts:
         - mountPath: /etc/rok-access
           name: rok-access
           readOnly: true
+      env:
+        - name: PULP_DOMAIN
+          value: $(params.pulpDomain)
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        set +x
+        pulp_domain="${PULP_DOMAIN}"
+        if [ "${pulp_domain}" != "konflux-direct-signing-test" ]; then
+          echo "Fixture upload may only use konflux-direct-signing-test" >&2
+          exit 1
+        fi
+        config="$(mktemp /tmp/pulp-config.XXXXXX)"
+        trap 'rm -f "${config}"' EXIT
+        chmod 600 "${config}"
+        if ! base64 -d /etc/rok-access/cli.toml > "${config}" 2>/dev/null; then
+          cp /etc/rok-access/cli.toml "${config}"
+        fi
+        grep -q '^domain = ' "${config}"
+        sed -i "s/^domain = .*/domain = \"${pulp_domain}\"/" "${config}"
+        grep -Fqx "domain = \"${pulp_domain}\"" "${config}"
+        if ! pulp-tool --config "${config}" \
+          --build-id "$(params.snapshotBuildId)" \
+          --namespace "$(params.snapshotNamespace)" \
+          upload --rpm-path /var/workdir/fixture-rpms \
+          --artifact-results "$(params.dataDir)/artifacts" > /dev/null 2>&1; then
+          echo "Pulp upload failed; tool output suppressed to protect credentials" >&2
+          exit 1
+        fi
+        test -s "$(params.dataDir)/artifacts/pulp_results.json"
     - name: create-trusted-artifact
       computeResources:
         limits:
